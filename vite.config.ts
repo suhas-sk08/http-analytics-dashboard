@@ -33,4 +33,12 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
   },
+  server: {
+    proxy: {
+      "/ws": {
+        target: "ws://127.0.0.1:5001",
+        ws: true,
+      },
+    },
+  },
 });

@@ -1,6 +1,8 @@
 import { users, type User, type InsertUser, type HttpLog, type InsertHttpLog } from "@shared/schema";
 import session, { Store } from "express-session";
 import createMemoryStore from "memorystore";
+import { analyze } from "./aiAgent";
+import { broadcastUpdate } from "./ws";
 
 const MemoryStore = createMemoryStore(session);
 
@@ -11,7 +13,7 @@ export interface IStorage {
   getHttpLogs(startDate: Date, endDate: Date): Promise<HttpLog[]>;
   addHttpLog(log: InsertHttpLog): Promise<HttpLog>;
   sessionStore: Store;
-  onNewLog?: (log: HttpLog) => void;
+  onNewLog?: (log: HttpLog) => void; 
 }
 
 export class MemStorage implements IStorage {
@@ -36,7 +38,8 @@ export class MemStorage implements IStorage {
 
     // Simulate real-time logs every few seconds
     setInterval(() => {
-      const statusCodes = [200, 201, 400, 401, 403, 404, 500, 502, 503];
+      const statusCodes = [200, 200, 200, 200, 200, 500, 500, 502, 503];
+      
       const messages = [
         "OK", "Created", "Bad Request", "Unauthorized", "Forbidden",
         "Not Found", "Internal Server Error", "Bad Gateway", "Service Unavailable"
@@ -72,22 +75,38 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async addHttpLog(log: InsertHttpLog): Promise<HttpLog> {
-    const id = this.currentLogId++;
-    const httpLog: HttpLog = { 
-      ...log, 
-      id,
-      timestamp: new Date()
-    };
-    this.httpLogs.set(id, httpLog);
+ async addHttpLog(log: InsertHttpLog): Promise<HttpLog> {
+  const id = this.currentLogId++;
+  const httpLog: HttpLog = { 
+    ...log, 
+    id,
+    timestamp: new Date()
+  };
 
-    // Notify listeners about the new log
-    if (this.onNewLog) {
-      this.onNewLog(httpLog);
-    }
+  this.httpLogs.set(id, httpLog);
 
-    return httpLog;
+  const anomaly = analyze({
+    statusCode: httpLog.statusCode,
+    timestamp: httpLog.timestamp.getTime(),
+    responseTime: 0
+  });
+
+  if (anomaly) {
+    broadcastUpdate({
+      event: "AI_ALERT",
+      ...anomaly,
+      timestamp: httpLog.timestamp,
+    });
   }
+
+  // Existing real-time updates
+  if (this.onNewLog) {
+    this.onNewLog(httpLog);
+  }
+
+  return httpLog;
+}
+
 
   private addSampleLogs() {
     const sampleLogs: InsertHttpLog[] = [
